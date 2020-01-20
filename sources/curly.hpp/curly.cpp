@@ -37,6 +37,17 @@ namespace
         CURL,
         decltype(&curl_easy_cleanup)>;
 
+    class mime_deleter
+    {
+    public:
+        void operator()(curl_mime* data)
+        {
+            curl_mime_free(data);
+        }
+    };
+
+    using mime_handle_t = std::unique_ptr<curl_mime, mime_deleter>;
+
     using slist_t = std::unique_ptr<
         curl_slist,
         decltype(&curl_slist_free_all)>;
@@ -45,11 +56,11 @@ namespace
     public:
         using data_t = std::vector<char>;
 
-        default_uploader(const data_t* src) noexcept
+        explicit default_uploader(const data_t* src) noexcept
         : data_(*src)
         , size_(src->size()) {}
 
-        std::size_t size() const override {
+        [[nodiscard]] std::size_t size() const override {
             return size_.load();
         }
 
@@ -59,6 +70,20 @@ namespace
             uploaded_ += size;
             return size;
         }
+
+        int seek(curl_off_t offset, int origin) override
+        {
+            auto res = CURL_SEEKFUNC_CANTSEEK;
+
+            if(origin == SEEK_SET)
+            {
+                uploaded_ = offset;
+                res = CURL_SEEKFUNC_OK;
+            }
+
+            return res;
+        }
+
     private:
         const data_t& data_;
         std::size_t uploaded_{0};
@@ -69,7 +94,7 @@ namespace
     public:
         using data_t = std::vector<char>;
 
-        default_downloader(data_t* dst) noexcept
+        explicit default_downloader(data_t* dst) noexcept
         : data_(*dst) {}
 
         std::size_t write(const char* src, std::size_t size) override {
@@ -191,6 +216,18 @@ namespace
             }
         }
         return {result, &curl_slist_free_all};
+    }
+
+    mime_handle_t make_fields(const fields_t& fields, CURL* curl) {
+        auto mime = mime_handle_t(curl_mime_init(curl));
+
+        for(const auto& pair : fields) {
+            auto part = curl_mime_addpart(mime.get());
+            curl_mime_name(part, pair.first.c_str());
+            curl_mime_data(part, pair.second.c_str(), CURL_ZERO_TERMINATED);
+        }
+
+        return mime;
     }
 
     std::string make_escaped_string(std::string_view s) {
@@ -335,6 +372,9 @@ namespace curly_hpp
             curl_easy_setopt(curlh_.get(), CURLOPT_WRITEDATA, this);
             curl_easy_setopt(curlh_.get(), CURLOPT_WRITEFUNCTION, &s_download_callback_);
 
+            curl_easy_setopt(curlh_.get(), CURLOPT_SEEKDATA, this);
+            curl_easy_setopt(curlh_.get(), CURLOPT_SEEKFUNCTION, &s_upload_seek_callback_);
+
             curl_easy_setopt(curlh_.get(), CURLOPT_NOPROGRESS, 0l);
             curl_easy_setopt(curlh_.get(), CURLOPT_XFERINFODATA, this);
             curl_easy_setopt(curlh_.get(), CURLOPT_XFERINFOFUNCTION, &s_progress_callback_);
@@ -384,6 +424,10 @@ namespace curly_hpp
             case http_method::OPTIONS:
                 curl_easy_setopt(curlh_.get(), CURLOPT_CUSTOMREQUEST, "OPTIONS");
                 curl_easy_setopt(curlh_.get(), CURLOPT_NOBODY, 1l);
+                break;
+            case http_method::MULTIPART_FORM:
+                mime_ = make_fields(breq_.fields(), curlh_.get());
+                curl_easy_setopt(curlh_.get(), CURLOPT_MIMEPOST, mime_.get());
                 break;
             default:
                 throw exception("curly_hpp: unexpected request method");
@@ -690,6 +734,13 @@ namespace curly_hpp
             return self->upload_callback_(buffer, size * nitems);
         }
 
+        static std::size_t s_upload_seek_callback_(
+                void* userp, curl_off_t offset, int origin)
+        {
+            auto* self = static_cast<internal_state*>(userp);
+            return self->seek_callback_(userp, offset, origin);
+        }
+
         static std::size_t s_download_callback_(
             char* ptr, std::size_t size, std::size_t nmemb, void* userdata) noexcept
         {
@@ -723,6 +774,20 @@ namespace curly_hpp
                 return read_bytes;
             } catch (...) {
                 return CURL_READFUNC_ABORT;
+            }
+        }
+
+        int seek_callback_(void* /*internal_state*/, curl_off_t offset, int origin) noexcept
+        {
+            try
+            {
+                std::lock_guard<std::mutex> guard(mutex_);
+                uploaded_ = offset;
+                return breq_.uploader()->seek(offset, origin);
+            }
+            catch(...)
+            {
+                return CURL_SEEKFUNC_FAIL;
             }
         }
 
@@ -789,6 +854,7 @@ namespace curly_hpp
         request_builder breq_;
         curlh_t curlh_{nullptr, &curl_easy_cleanup};
         slist_t hlist_{nullptr, &curl_slist_free_all};
+        mime_handle_t mime_{};
         std::string url_with_qparams_;
         time_point_t last_response_{time_point_t::clock::now()};
         time_point_t::duration response_timeout_{0};
@@ -815,7 +881,7 @@ namespace curly_hpp
 
 namespace curly_hpp
 {
-    request::request(internal_state_ptr state)
+    request::request(const internal_state_ptr& state)
     : state_(state) {
         assert(state);
     }
@@ -936,6 +1002,18 @@ namespace curly_hpp
 
     request_builder& request_builder::header(std::string k, std::string v) {
         headers_.insert_or_assign(std::move(k), std::move(v));
+        return *this;
+    }
+
+    request_builder& request_builder::fields(fields_ilist_t hs) {
+        for ( const auto& [k,v] : hs ) {
+            fields_.insert_or_assign(std::string(k), v);
+        }
+        return *this;
+    }
+
+    request_builder& request_builder::field(std::string k, std::string v) {
+        fields_.insert_or_assign(std::move(k), std::move(v));
         return *this;
     }
 
@@ -1062,6 +1140,10 @@ namespace curly_hpp
 
     const headers_t& request_builder::headers() const noexcept {
         return headers_;
+    }
+
+    const fields_t & request_builder::fields() const noexcept {
+        return fields_;
     }
 
     bool request_builder::verbose() const noexcept {
