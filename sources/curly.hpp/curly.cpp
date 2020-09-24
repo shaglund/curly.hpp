@@ -386,12 +386,6 @@ namespace curly_hpp
             curl_easy_setopt(curlh_.get(), CURLOPT_HTTPHEADER, hlist_.get());
             curl_easy_setopt(curlh_.get(), CURLOPT_VERBOSE, breq_.verbose() ? 1l : 0l);
 
-            if ( !breq_.proxy().proxy().empty() ) {
-                curl_easy_setopt(curlh_.get(), CURLOPT_PROXY, breq_.proxy().proxy().c_str());
-                curl_easy_setopt(curlh_.get(), CURLOPT_PROXYUSERNAME, breq_.proxy().username().c_str());
-                curl_easy_setopt(curlh_.get(), CURLOPT_PROXYPASSWORD, breq_.proxy().password().c_str());
-            }
-
             switch ( breq_.method() ) {
             case http_method::DEL:
                 curl_easy_setopt(curlh_.get(), CURLOPT_CUSTOMREQUEST, "DELETE");
@@ -465,6 +459,19 @@ namespace curly_hpp
                 }
                 if ( !proxy.public_key().empty() ) {
                     curl_easy_setopt(curlh_.get(), CURLOPT_PROXY_PINNEDPUBLICKEY, proxy.public_key().c_str());
+                }
+                if ( proxy.verification() ) {
+                    curl_easy_setopt(curlh_.get(), CURLOPT_PROXY_SSL_VERIFYPEER, 1l);
+                    curl_easy_setopt(curlh_.get(), CURLOPT_PROXY_SSL_VERIFYHOST, 2l);
+                } else {
+                    curl_easy_setopt(curlh_.get(), CURLOPT_PROXY_SSL_VERIFYPEER, 0l);
+                    curl_easy_setopt(curlh_.get(), CURLOPT_PROXY_SSL_VERIFYHOST, 0l);
+                }
+                if ( proxy.capath() && !proxy.capath()->empty() ) {
+                    curl_easy_setopt(curlh_.get(), CURLOPT_PROXY_CAPATH, proxy.capath()->c_str());
+                }
+                if ( proxy.cabundle() && !proxy.cabundle()->empty() ) {
+                    curl_easy_setopt(curlh_.get(), CURLOPT_PROXY_CAINFO, proxy.cabundle()->c_str());
                 }
             }
             if ( breq_.capath() ) {

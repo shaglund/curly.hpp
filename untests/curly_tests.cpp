@@ -1524,7 +1524,8 @@ SCENARIO("Public key pinning")
                 auto req2 = net::request_builder(url)
                         .method(net::http_method::GET)
                         .verification(true)
-                        .pinned_public_key("sha256//Yvh6l+lXgqrBJrCtxwr9r/vbERE37/5/p6AaRRsiboQ=")
+                        .pinned_public_key("sha256//flUN9mYPmbQZ0jCTHMo2iEhYuYQrJ3iKdeRV7x+8s50=")
+
                         .send();
                 REQUIRE(req2.take().http_code() == net::response_code::OK);
             }
