@@ -193,6 +193,17 @@ namespace curly_hpp
             return *this;
         }
 
+        proxy_t& verification(bool v, std::optional<std::string> capath, std::optional<std::string> cabundle) noexcept {
+            verification_ = v;
+            capath_ = std::move(capath);
+            cabundle_ = std::move(cabundle);
+            return *this;
+        }
+
+        [[nodiscard]] bool verification() const noexcept {
+            return verification_;
+        }
+
         [[nodiscard]] const std::string& proxy() const noexcept {
             return proxy_;
         }
@@ -209,11 +220,22 @@ namespace curly_hpp
             return public_key_;
         }
 
+        [[nodiscard]] const std::optional<std::string>& capath() const noexcept {
+            return capath_;
+        }
+
+        [[nodiscard]] const std::optional<std::string>& cabundle() const noexcept {
+            return cabundle_;
+        }
+
     private:
         std::string proxy_{};
         std::string username_{};
         std::string password_{};
         std::string public_key_{};
+        std::optional<std::string> capath_{};
+        std::optional<std::string> cabundle_{};
+        bool verification_{false};
     };
 }
 
