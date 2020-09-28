@@ -495,7 +495,7 @@ namespace curly_hpp
         request_builder& progressor(progressor_uptr p) noexcept;
 
         [[nodiscard]] const std::string& url() const noexcept;
-        [[nodiscard]] const proxy_t& proxy() const noexcept;
+        [[nodiscard]] proxy_t& proxy() noexcept;
         [[nodiscard]] http_method method() const noexcept;
         [[nodiscard]] const std::size_t& resume_offset() const noexcept;
         [[nodiscard]] const qparams_t& qparams() const noexcept;

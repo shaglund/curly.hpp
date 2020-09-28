@@ -1133,7 +1133,7 @@ namespace curly_hpp
         return pinned_public_key_;
     }
 
-    const proxy_t& request_builder::proxy() const noexcept {
+    proxy_t& request_builder::proxy() noexcept {
         return proxy_;
     }
 
